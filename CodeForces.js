@@ -44,6 +44,9 @@ function createTag(obj){
     if ('class' in obj){ tag.className = obj.class; }
     if ('html' in obj){ tag.innerHTML = obj.html; }
     if ('width' in obj){ tag.style.width = obj.width; }
+    if ('textAlign' in obj){ tag.style.textAlign = obj.textAlign; }
+    if ('paddingLeft' in obj){ tag.style.paddingLeft = obj.paddingLeft; }
+    if ('fontWeight' in obj){ tag.style.fontWeight = obj.fontWeight; }
     return tag;
 }
 
@@ -52,7 +55,7 @@ function ratingHTML(rating){
     const str = rating.toString();
     if (rank in rankFirstLetter){
         return '<span class="' + rankToClass[rank] + '">'
-             + '    <span style="color: ' + rankFirstLetter[rank] + '">' + str[0] + '</span>'
+             + '<span style="color: ' + rankFirstLetter[rank] + '">' + str[0] + '</span>'
              + str.substr(1)
              + '</span>'
     }
@@ -75,7 +78,16 @@ async function CodeForcesEdit(){
     const contest = await callAPI('https://codeforces.com/api/contest.standings?contestId=' + contestID);
     const problemCount = contest.problems.length;
 
-    const scoreboardTag = document.getElementsByClassName('standings')[0].children[0];
+    let userArray = [];
+    {
+        const scoreboard = document.getElementsByClassName('standings')[0].children[0];
+        const rowCount = scoreboard.childElementCount;
+        for (let i = 1; i < rowCount-1; i++){
+            const handle = scoreboard.children[i].children[1].getElementsByTagName('a')[0].innerText;
+            if ( !userArray.includes(handle) ){ userArray.push(handle); }
+        }
+    }
+    const userCount = userArray.length;
     
     const scoreboard = document.getElementsByClassName('standings')[0];
     scoreboard.innerHTML = "";
@@ -114,6 +126,25 @@ async function CodeForcesEdit(){
         tr.appendChild( createTag({ tag: 'th', html: 'Rating', class: 'top right', width: '8em' }) );
 
         thead.appendChild(tr);
+    }
+    
+    for (let i = 0; i < userCount; i++){
+        const handle = userArray[i];
+        const tr = document.createElement('tr');
+        const dark = (i%2 == 0) ? 'dark' : 'light';
+        
+        tr.appendChild( createTag({ tag: 'td', class: 'left '+dark, html: i+'<br><small style="color:#BBBBBB">(' + i + ')</small>' }) );
+        tr.appendChild( createTag({ tag: 'td', class: 'contestant-cell '+dark, html: handle, textAlign: 'left', paddingLeft: '1em' }) );
+        tr.appendChild( createTag({ tag: 'td', class: dark }) );
+        tr.appendChild( createTag({ tag: 'td', class: dark }) );
+        for (let j = 0; j < problemCount; j++){
+            tr.appendChild( createTag({ tag: 'td', class: dark }) );
+        }
+        tr.appendChild( createTag({ tag: 'td', class: dark }) );
+        tr.appendChild( createTag({ tag: 'td', class: dark }) );
+        tr.appendChild( createTag({ tag: 'td', class: 'right '+dark }) );
+
+        tbody.appendChild(tr);
     }
 
     scoreboard.appendChild(thead);
