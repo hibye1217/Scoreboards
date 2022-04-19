@@ -1,3 +1,6 @@
+const APPROXIMATE = 0, ACCURATE = 1;
+const HIDE = 0, SHOW = 1;
+
 function ratingToRank(rating){
     if      (3000 <= rating){ return 'LGM'; }
     else if (2600 <= rating){ return 'IGM'; }
@@ -26,29 +29,46 @@ const rankToClass = {
 const rankFirstLetter = {
     'LGM': '#000000',
     'IGM': '#990000',
-    'IM': '#FF0000',
+    'IM': '#995500'
 }
 
 
 
+function copyObject(tar, obj){
+    for (let key of Object.keys(obj)){
+        if (typeof obj[key] === 'object'){
+            tar[key] = {}; copyObject(tar[key], obj[key]);
+        }
+        else{ tar[key] = obj[key]; }
+    }
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function callAPI(link){
-    await sleep(3000);
+    console.info("API Called:", link)
+    await sleep(2002);
     const res = await( await fetch(link) ).json();
+    console.info("API Returned:", res)
     if (res.status == "OK"){ return res.result; }
     else{ return {}; }
 }
 
-function createTag(obj){
-    const tag = document.createElement(obj.tag);
-    if ('class' in obj){ tag.className = obj.class; }
-    if ('html' in obj){ tag.innerHTML = obj.html; }
-    if ('width' in obj){ tag.style.width = obj.width; }
-    if ('textAlign' in obj){ tag.style.textAlign = obj.textAlign; }
-    if ('paddingLeft' in obj){ tag.style.paddingLeft = obj.paddingLeft; }
-    if ('fontWeight' in obj){ tag.style.fontWeight = obj.fontWeight; }
-    if ('fontSize' in obj){ tag.style.fontSize = obj.fontSize; }
+function createTag(tagName, obj){
+    let tag = document.createElement(tagName);
+    if (obj != undefined){ copyObject(tag, obj); }
     return tag;
+}
+
+
+
+function getContestIdFromURL(){
+    const url = window.location.href.substring( 'https://codeforces.com/contest/'.length );
+    let res = "";
+    for (let i = 0; ; i++){
+        if ('0' <= url[i] && url[i] <= '9'){ res += url[i]; }
+        else{ break; }
+    }
+    return parseInt(res);
 }
 
 function numberToPMString(num){
@@ -57,19 +77,64 @@ function numberToPMString(num){
     else{ return "±0"; }
 }
 
+function resultCount(waCount, accepted){
+    if (accepted){
+        if (waCount == 0){ return "+"; }
+        else{ return "+" + waCount; }
+    }
+    else{
+        if (waCount == 0){ return "-"; }
+        else{ return "-" + waCount; }
+    }
+}
+
+function timeToScore(maxScore, endTime, submitTime, waCount){
+    let endMinute = Math.floor(endTime / 60), submitMinute = Math.floor(submitTime / 60);
+    let val1 = Math.ceil( maxScore - (120*maxScore*submitMinute) / (250*endMinute) - 50*waCount );
+    let val2 = Math.ceil( maxScore * 3/10 );
+    return Math.max(val1, val2);
+}
+
+function frontZero(num, len){
+    let res = "" + num;
+    while (res.length < len){ res = '0' + res; }
+    return res;
+}
+
+function secondToTime(second){
+    let minute = Math.floor(second / 60); second %= 60;
+    let hour = Math.floor(minute / 60); minute %= 60;
+    let res = frontZero(hour, 2) + ":" + frontZero(minute, 2) + ":" + frontZero(second, 2);
+    while (res.length > 4){
+        if ('1' <= res[0] && res[0] <= '9'){ break; }
+        else{ res = res.substring(1); }
+    }
+    return res;
+}
+
+function countMinus(count){
+    if (count >= 6){ return 0; }
+    if (count == 5){ return 50; }
+    if (count == 4){ return 50+100; }
+    if (count == 3){ return 50+100+150; }
+    if (count == 2){ return 50+100+150+250; }
+    if (count == 1){ return 50+100+150+250+350; }
+    return 50+100+150+250+350+500;
+}
+
 
 
 function ratingHTML(rating){
     const rank = ratingToRank(rating);
     const str = rating.toString();
     if (rank in rankFirstLetter){
-        return '<span class="' + rankToClass[rank] + '">'
+        return '<span class="' + rankToClass[rank] + '" style="font-weight: bold; display: inline-block">'
              + '<span style="color: ' + rankFirstLetter[rank] + '">' + str[0] + '</span>'
              + str.substr(1)
              + '</span>'
     }
     else{
-        return '<span class="' + rankToClass[rank] + '">' + str + '</span>'
+        return '<span class="' + rankToClass[rank] + '" style="font-weight: bold; display: inline-block">' + str + '</span>'
     }
 }
 
@@ -104,140 +169,305 @@ function hackHTML(successful, unsuccessful){
 
 
 
-async function CodeForcesEdit(){
-    const url = window.location.href.substring( "https://codeforces.com/contest/".length );
-    let contestID = "";
-    for (let i = 0; ; i++){
-        if ('0' <= url[i] && url[i] <= '9'){ contestID += url[i]; }
-        else{ break; }
-    }
-    contestID = parseInt(contestID);
+async function CodeForcesEdit(showType, performanceColumn){
+    const contestID = getContestIdFromURL();
+    const contest = await callAPI('https://codeforces.com/api/contest.standings?contestId=' + contestID + '&showUnofficial=true')
 
-    const contest = await callAPI('https://codeforces.com/api/contest.standings?contestId=' + contestID + '&showUnofficial=true');
-    const problemCount = contest.problems.length;
-    
-    let officialScoreboard = [], unofficialScoreboard = [];
+    const allScoreboard = [];
     contest.rows.forEach(row => {
-        if (row.party.participantType == "CONTESTANT"){
-            officialScoreboard.push( Object.assign({}, row) );
-            unofficialScoreboard.push( Object.assign({}, row) );
-        }
-        if (row.party.participantType == "OUT_OF_COMPETITION"){
-            unofficialScoreboard.push( Object.assign({}, row) );
+        if (row.party.participantType == "CONTESTANT" || row.party.participantType == "OUT_OF_COMPETITION"){
+            allScoreboard.push(row);
         }
     });
+    const allUserCount = allScoreboard.length;
 
-    const officialCount = officialScoreboard.length, unofficialCount = unofficialScoreboard.length;
-    let officialRank = 1, unofficialRank = 1;
-    for (let i = 0; i < officialCount; i++){
-        if (i != 0 && officialScoreboard[i-1].points != officialScoreboard[i].points){ officialRank = i+1; }
-        officialScoreboard[i].rank = officialRank;
-    }
-    for (let i = 0; i < unofficialCount; i++){
-        if (i != 0 && unofficialScoreboard[i-1].points != unofficialScoreboard[i].points){ unofficialRank = i+1; }
-        unofficialScoreboard[i].rank = unofficialRank;
+    const contestList = await callAPI('https://codeforces.com/api/contest.list');
+    let contestIndex = 0, newRated = false;
+
+    while (contestList[contestIndex].id != contestID){
+        if (contestList[contestIndex].id == 1360){ newRated = false; }
+        contestIndex += 1;
     }
 
-    let userArray = [];
+    const ratedScoreboard = [];
+    if (showType == ACCURATE){
+        for (let rowIndex = 0; rowIndex < allUserCount; rowIndex++){
+            const row = allScoreboard[rowIndex];
+            const handle = row.party.members[0].handle;
+            const history = await callAPI('https://codeforces.com/api/user.rating?handle=' + handle);
+            
+            row.isRated = false;
+
+            let pointer = history.length - 1;
+            for (let j = 0; j <= contestIndex; j++){
+                if (pointer < 0){ break; }
+                if (history[pointer].contestId == contestList[j].id){
+                    if (j == contestIndex){
+                        row.isRated = true;
+                        row.beforeRating = history[pointer].oldRating;
+                        row.afterRating = history[pointer].newRating;
+                        if (pointer == 0){
+                            if (newRated){ row.beforeRating = 100; }
+                            else{ row.beforeRating = 1500; }
+                        }
+                    }
+                    pointer -= 1;
+                }
+            }
+
+            row.contestCount = pointer+1;
+            if (pointer >= 0){
+                row.rating = history[pointer].newRating;
+                if (newRated){ row.rating += countMinus(row.contestCount); }
+            }
+            else{
+                if (newRated){ row.rating = 1400; }
+                else{ row.rating = 1500; }
+            }
+
+            if (row.isRated){ ratedScoreboard.push(row); }
+        }
+    }
+    if (showType == APPROXIMATE){
+        const ratedList = await callAPI('https://codeforces.com/api/contest.ratingChanges?contestId=' + contestID);
+        for (let rowIndex = 0; rowIndex < allUserCount; rowIndex++){
+            const row = allScoreboard[rowIndex];
+            const handle = row.party.members[0].handle;
+            row.isRated = false; row.rating = undefined;
+            for (let ratedIndex = 0; ratedIndex < ratedList.length; ratedIndex++){
+                if (ratedList[ratedIndex].handle == handle){
+                    row.isRated = true; ratedScoreboard.push(row);
+                    row.beforeRating = ratedList[ratedIndex].oldRating;
+                    row.afterRating = ratedList[ratedIndex].newRating;
+                    row.rating = row.beforeRating;
+                }
+            }
+        }
+    }
+    const ratedUserCount = ratedScoreboard.length;
+    // console.log("ratedScoreboard", ratedScoreboard);
+
+    let allRank = 0, ratedRank = 0;
+    if (ratedUserCount >= 1){
+        let pointer = 0, score = ratedScoreboard[0].points;
+        for (let ratedUserIndex = 0; ratedUserIndex < ratedUserCount; ratedUserIndex++){
+            if (ratedScoreboard[ratedUserIndex].points != score){
+                for (let i = pointer; i < ratedUserIndex; i++){ ratedScoreboard[i].ratedRank = i; }
+                pointer = ratedUserIndex; score = ratedScoreboard[ratedUserIndex].points;
+            }
+        }
+        for (let i = pointer; i < ratedUserCount; i++){ ratedScoreboard[i].ratedRank = ratedUserCount; }
+    }
+    if (showType == ACCURATE){
+        let pointer = 0, score = allScoreboard[0].points;
+        for (let allUserIndex = 0; allUserIndex < allUserCount; allUserIndex++){
+            if (allScoreboard[allUserIndex].points != score){
+                for (let i = pointer; i < allUserIndex; i++){ allScoreboard[i].allRank = i; }
+                pointer = allUserIndex; score = allScoreboard[allUserIndex].points;
+            }
+        }
+        for (let i = pointer; i < allUserCount; i++){ allScoreboard[i].allRank = allUserCount; }
+    }
+
+    if (ratedUserCount >= 1){
+        // Calculate Rated Performance
+    }
+    if (showType == ACCURATE){
+        // Calculate All Performance
+    }
+    if (showType == APPROXIMATE){
+        // Calculate Approximate Performance using Rated Performance
+    }
+
+    const problemCount = contest.problems.length;
+    let problemConverter = {};
+    for (let i = 0; i < problemCount; i++){
+        problemConverter[ contest.problems[i].index ] = i;
+    }
+
+    let showArray = [];
     {
         const scoreboard = document.getElementsByClassName('standings')[0].children[0];
         const rowCount = scoreboard.childElementCount;
-        for (let i = 1; i < rowCount-1; i++){
-            const handle = scoreboard.children[i].children[1].getElementsByTagName('a')[0].innerText;
-            if ( !userArray.includes(handle) ){ userArray.push(handle); }
+        for (let rowIndex = 1; rowIndex < rowCount-1; rowIndex++){
+            const handle = scoreboard.children[rowIndex].children[1].getElementsByTagName('a')[0].innerText;
+            if ( !showArray.includes(handle) ){ showArray.push(handle); }
         }
     }
-    const userCount = userArray.length;
-    
+    const showCount = showArray.length;
+
+    allRank = 1;
+    for (let rowIndex = 0; rowIndex < allUserCount; rowIndex++){
+        if (rowIndex != 0 && allScoreboard[rowIndex-1].points != allScoreboard[rowIndex].points){ allRank = rowIndex+1; }
+        allScoreboard[rowIndex].allRank = allRank;
+    }
+    ratedRank = 1;
+    for (let rowIndex = 0; rowIndex < ratedUserCount; rowIndex++){
+        if (rowIndex != 0 && ratedScoreboard[rowIndex-1].points != ratedScoreboard[rowIndex].points){ ratedRank = rowIndex+1; }
+        ratedScoreboard[rowIndex].ratedRank = ratedRank;
+    }
+
     const scoreboard = document.getElementsByClassName('standings')[0];
     scoreboard.innerHTML = "";
 
-    const thead = document.createElement('thead');
-    const tbody = document.createElement('tbody');
-
+    const thead = createTag('thead');
     {
-        const tr = document.createElement('tr');
+        const tr = createTag('tr');
 
-        tr.appendChild( createTag({ tag: 'th', html: 'Rank', class: 'top left', width: '4em' }) );
-        tr.appendChild( createTag({ tag: 'th', html: 'User', class: 'top' }) );
-        tr.appendChild( createTag({ tag: 'th', html: 'Score', class: 'top', width: '4em' }) );
-        tr.appendChild( createTag({ tag: 'th', html: 'Hacks', class: 'top', width: '4em' }) );
+        tr.appendChild( createTag('th', { innerHTML: "Rank", className: 'top left', style: { width: '4em' } }) );
+        tr.appendChild( createTag('th', { innerHTML: "User", className: 'top' }) );
+        tr.appendChild( createTag('th', { innerHTML: "Score", className: 'top', style: { width: '4em' } }) );
+        tr.appendChild( createTag('th', { innerHTML: "Hacks", className: 'top', style: { width: '4em' } }) );
         for (let problemIndex = 0; problemIndex < problemCount; problemIndex++){
             const problem = contest.problems[problemIndex];
-            if (problem.rating == undefined){
-                tr.appendChild( createTag({
-                    tag: 'th',
-                    html: '<span>' + problem.index + '</span>' + '<br>'
-                        + '<span class="small">' + problem.points + '</span>',
-                    class: 'top', width: '5em'
-                }) );
-            }
-            else{
-                tr.appendChild( createTag({
-                    tag: 'th',
-                    html: '<span>' + problem.index + '<sup class="small">' + ratingHTML(problem.rating) + '</sup></span>' + '<br>'
-                        + '<span class="small">' + problem.points + '</span>',
-                    class: 'top', width: '5em'
-                }) );
-            }
+            const th = createTag('th', { innerHTML: '<span>' + problem.index + '</span>', className: 'top', style: { width: '5em' } });
+            if (problem.rating != undefined){ th.innerHTML += '<sup class="small">' + ratingHTML(problem.rating) + '</sup>'; }
+            if (problem.points != undefined){ th.innerHTML += '<br>' + '<span class="small">' + problem.points + '</span>'; }
+            tr.appendChild(th);
         }
-        tr.appendChild( createTag({ tag: 'th', html: 'Perf.', class: 'top', width: '4em' }) );
-        tr.appendChild( createTag({ tag: 'th', html: 'Delta', class: 'top', width: '4em' }) );
-        tr.appendChild( createTag({ tag: 'th', html: 'Rating', class: 'top right', width: '8em' }) );
+        if (performanceColumn == SHOW){
+            tr.appendChild( createTag('th', { innerHTML: "Perf.", className: 'top', style: { width: '4em' } }) );
+            tr.appendChild( createTag('th', { innerHTML: "Delta", className: 'top', style: { width: '4em' } }) );
+            tr.appendChild( createTag('th', { innerHTML: "Rating", className: 'top right', style: { width: '8em' } }) );
+        }
 
         thead.appendChild(tr);
     }
+    scoreboard.appendChild(thead);
 
-    const contestList = await callAPI('https://codeforces.com/api/contest.list');
-
-    let contestIndex = 0;
-    while (contestList[contestIndex].id != contestID){ contestIndex += 1; }
-    
-    for (let i = 0; i < userCount; i++){
-        const handle = userArray[i];
-        const tr = document.createElement('tr');
+    const tbody = createTag('tbody');
+    for (let i = 0; i < showCount; i++){
+        const handle = showArray[i];
+        const tr = createTag('tr');
         const dark = (i%2 == 0) ? 'dark' : 'light';
-        console.log(handle);
+        console.log("Showing:", handle);
 
-        let official = false, participated = false;
-        let officialData = {}, unofficialData = {};
-        officialScoreboard.forEach(row => {
-            if (row.party.members[0].handle == handle){ officialData = row; official = true; }
+        let ratedData = {}, rated = false;
+        let allData = {}, all = false;
+        ratedScoreboard.forEach(row => {
+            if (row.party.members[0].handle == handle){ ratedData = row; rated = true; }
         });
-        unofficialScoreboard.forEach(row => {
-            if (row.party.members[0].handle == handle){ unofficialData = row; participated = true; }
+        allScoreboard.forEach(row => {
+            if (row.party.members[0].handle == handle){ allData = row; all = true; }
         });
-        if (!participated){ continue; }
+        if (!all){ continue; }
 
-        const history = await callAPI('https://codeforces.com/api/user.rating?handle=' + handle);
-        let pointer = history.length - 1;
-        for (let j = 0; j <= contestIndex; j++){
-            if (pointer < 0){ break; }
-            if (history[pointer].contestId == contestList[j].id){ pointer -= 1; }
+        if (allData.rating == undefined){
+            const history = await callAPI('https://codeforces.com/api/user.rating?handle=' + handle);
+            let historyPointer = history.length - 1;
+            for (let historyIndex = 0; historyIndex <= contestIndex; historyIndex++){
+                if (historyPointer < 0){ break; }
+                if (history[historyPointer].contestId == contestList[historyIndex].id){ historyPointer -= 1; }
+            }
+            if (newRated){ allData.rating = 100; } else{ allData.rating = 1500; }
+            if (historyPointer >= 0){ allData.rating = history[historyPointer].newRating; }
         }
-        let rating = 0;
-        if (pointer >= 0){ rating = history[pointer].newRating; }
-        
-        if (official){
-            tr.appendChild( createTag({ tag: 'td', class: 'left '+dark, html: officialData.rank+'<br><small style="color:#BBBBBB">(' + unofficialData.rank + ')</small>' }) );
-            tr.appendChild( createTag({ tag: 'td', class: 'contestant-cell '+dark, html: userRatingHTML(handle, rating), textAlign: 'left', paddingLeft: '1em' }) );
+
+        const submissions = await callAPI('https://codeforces.com/api/contest.status?contestId=' + contestID + '&handle=' + handle);
+        const result = Array(problemCount);
+        for (let problemIndex = 0; problemIndex < problemCount; problemIndex++){ result[problemIndex] = []; }
+        submissions.forEach(submit => {
+            if (submit.author.participantType == "CONTESTANT" || submit.author.participantType == "OUT_OF_COMPETITION"){
+                result[ problemConverter[ submit.problem.index ] ].push(submit);
+            }
+        });
+
+        if (rated){
+            tr.appendChild( createTag('td', {
+                className: 'left ' + dark,
+                innerHTML: ratedData.ratedRank + '<br>' + '<small style="color: #BBBBBB">' + '(' + allData.allRank + ')' + '</small>'
+            }) );
+            tr.appendChild( createTag('td', {
+                className: 'contestant-cell ' + dark,
+                innerHTML: userRatingHTML(handle, ratedData.beforeRating),
+                style: { textAlign: 'left', paddingLeft: '1em' }
+            }) );
         }
         else{
-            tr.appendChild( createTag({ tag: 'td', class: 'left '+dark, html: '-'+'<br><small style="color:#BBBBBB">(' + unofficialData.rank + ')</small>' }) );
-            tr.appendChild( createTag({ tag: 'td', class: 'contestant-cell '+dark, html: '<small>*</small> ' + userRatingHTML(handle, rating), textAlign: 'left', paddingLeft: '1em' }) );
+            tr.appendChild( createTag('td', {
+                className: 'left ' + dark,
+                innerHTML: '-' + '<br>' + '<small style="color: #BBBBBB">' + '(' + allData.allRank + ')' + '</small>'
+            }) );
+            if (newRated && type == ACCURATE){
+                tr.appendChild( createTag('td', {
+                    className: 'contestant-cell ' + dark,
+                    innerHTML: '<small>*</small> ' + userRatingHTML(handle, allData.rating - countMinus(allData.contestCount)),
+                    style: { textAlign: 'left', paddingLeft: '1em' }
+                }) );
+            }
+            else{
+                tr.appendChild( createTag('td', {
+                    className: 'contestant-cell ' + dark,
+                    innerHTML: '<small>*</small> ' + userRatingHTML(handle, allData.rating),
+                    style: { textAlign: 'left', paddingLeft: '1em' }
+                }) );
+            }
         }
-        tr.appendChild( createTag({ tag: 'td', class: dark }) );
-        tr.appendChild( createTag({ tag: 'td', class: dark, html: hackHTML(unofficialData.successfulHackCount, unofficialData.unsuccessfulHackCount), fontSize: '9px' }) );
-        for (let j = 0; j < problemCount; j++){
-            tr.appendChild( createTag({ tag: 'td', class: dark }) );
+        tr.appendChild( createTag('td', { className: dark, innerHTML: allData.points, style: { fontWeight: 'bold' } }) );
+        tr.appendChild( createTag('td', {
+            className: dark, innerHTML: hackHTML(allData.successfulHackCount, allData.unsuccessfulHackCount),
+            style: { fontSize: '9px' }
+        }) );
+        for (let problemIndex = 0; problemIndex < problemCount; problemIndex++){
+            let acceptedSubmit = {}, accepted = false, acceptedWACount = 0;
+            let systestSubmit = {}, systest = false, systestWACount = 0;
+            let hackedSubmit = {}, hacked = false, hackedWACount = 0;
+            let finalSubmit = {}, submitted = false, waCount = 0;
+            result[problemIndex].forEach(submit => {
+                if (submit.verdict == "OK" && !accepted){ acceptedSubmit = submit; accepted = true; }
+                else if (submit.testset == "TESTS" && !systest){ systestSubmit = submit; systest = true; }
+                else if (submit.verdict == "CHALLENGED" && !hacked){ hackedSubmit = submit; hacked = true; }
+                if (!submitted){ finalSubmit = submit; submitted = true;}
+                if (submit.passedTestCount > 0){
+                    if (accepted){ acceptedWACount += 1; }
+                    if (systest){ systestWACount += 1; }
+                    if (hacked){ hackedWACount += 1; }
+                    if (submitted){ waCount += 1; }
+                }
+            });
+            if (accepted){
+                tr.appendChild( createTag('td', { className: dark, innerHTML: '<span class="cell-passed-system-test">' + timeToScore(contest.problems[problemIndex].points, contest.contest.durationSeconds, acceptedSubmit.relativeTimeSeconds, waCount) + '</span>'
+                + '<span class="cell-time">' + secondToTime(acceptedSubmit.relativeTimeSeconds) + ', ' + resultCount(acceptedWACount-1, true) + '</span>' }) )
+            }
+            else if (systest){
+                tr.appendChild( createTag('td', { className: dark, innerHTML: '<span class="cell-failed-system-test" style="text-decoration-line: line-through">' + timeToScore(contest.problems[problemIndex].points, contest.contest.durationSeconds, systestSubmit.relativeTimeSeconds, systestWACount) + '</span>'
+                + '<span class="cell-time">' + secondToTime(systestSubmit.relativeTimeSeconds) + ', ' + resultCount(systestWACount, false) + '</span>' }) );
+            }
+            else if (hacked){
+                tr.appendChild( createTag('td', { className: dark, innerHTML: '<span class="cell-challenged" style="text-decoration-line: line-through">' + timeToScore(contest.problems[problemIndex].points, contest.contest.durationSeconds, hackedSubmit.relativeTimeSeconds, hackedWACount) + '</span>'
+                + '<span class="cell-time">' + secondToTime(hackedSubmit.relativeTimeSeconds) + ', ' + resultCount(waCount, false) + '</span>' }) );
+            }
+            else if (submitted){
+                tr.appendChild( createTag('td', { className: dark, innerHTML: '<span class="cell-rejected">' + resultCount(waCount, false) + '</span>'
+                + '<span class="cell-time">' + secondToTime(finalSubmit.relativeTimeSeconds) + '</span>' }) );
+            }
+            else{
+                tr.appendChild( createTag('td', { className: dark }) );
+            }
+            if (performanceColumn == SHOW){
+                if (allData.isRated){ // Rated (RatingChange = true)
+                    if (showType == ACCURATE){ // Rated Performance + All Performance
+                    
+                    }
+                    if (showType == APPROXIMATE){ // Rated Performance
+    
+                    }
+                    // Delta
+                    // Rating Change
+                }
+                else{ // Unrated (RatingChange = false)
+                    if (showType == ACCURATE){ // All Performance
+                    
+                    }
+                    if (showType == APPROXIMATE){ // Approximated Performance using Rated Performance
+    
+                    }
+                    // Unrated
+                    // Rating
+                }
+            }
         }
-        tr.appendChild( createTag({ tag: 'td', class: dark }) );
-        tr.appendChild( createTag({ tag: 'td', class: dark }) );
-        tr.appendChild( createTag({ tag: 'td', class: 'right '+dark }) );
-
         tbody.appendChild(tr);
     }
-
-    scoreboard.appendChild(thead);
     scoreboard.appendChild(tbody);
-} CodeForcesEdit();
+} CodeForcesEdit(APPROXIMATE, SHOW);
