@@ -1,5 +1,6 @@
 const APPROXIMATE = 0, ACCURATE = 1;
-const HIDE = 0, SHOW = 1;
+const HIDE_PERFORMANCE = 0, SHOW_PERFORMANCE = 1;
+const EXCLUDE_VIRTUAL = 0, PARTIAL_VIRTUAL = 1, INCLUDE_VIRTUAL = 2;
 
 function ratingToRank(rating){
     if      (3000 <= rating){ return 'LGM'; }
@@ -57,6 +58,10 @@ function createTag(tagName, obj){
     let tag = document.createElement(tagName);
     if (obj != undefined){ copyObject(tag, obj); }
     return tag;
+}
+
+function eloWinProbability(r1, r2){
+    return 1 / ( 1 + Math.pow(10, (r2-r1)/400) );
 }
 
 
@@ -125,6 +130,8 @@ function countMinus(count){
 
 
 function ratingHTML(rating){
+    if (rating == Infinity){ return '<span class="user-legendary" style="font-weight: bold; display: inline-block; color: #000000">∞</span>'; }
+    if (rating == -Infinity){ return '<span class="user-gray" style="font-weight: bold; display: inline-block">-∞</span>'; }
     const rank = ratingToRank(rating);
     const str = rating.toString();
     if (rank in rankFirstLetter){
@@ -169,23 +176,39 @@ function hackHTML(successful, unsuccessful){
 
 
 
-async function CodeForcesEdit(showType, performanceColumn){
+async function CodeForcesEdit(showType, performanceColumn, virtualParticipation){
+    console.log("Editing Codeforces Scoreboard with...");
+
+    if (performanceColumn == SHOW_PERFORMANCE){
+        console.log("- Showing Performance Column");
+        if (showType == ACCURATE){ console.log("    - with Accurate Performance"); }
+        if (showType == APPROXIMATE){ console.log("    - with Approximated Performance"); }
+        if (virtualParticipation == INCLUDE_VIRTUAL){ console.log("    - with virtual participants"); }
+        if (virtualParticipation == PARTIAL_VIRTUAL){ console.log("    - without virtual participants") }
+    }
+    if (performanceColumn == HIDE_PERFORMANCE){ console.log("- Hiding Performance Column"); }
+
+    if (virtualParticipation == EXCLUDE_VIRTUAL){ console.log("- Not showing virtual participants"); }
+    if (virtualParticipation == PARTIAL_VIRTUAL || virtualParticipation == INCLUDE_VIRTUAL){ console.log("- Showing virtual participants"); }
+
     const contestID = getContestIdFromURL();
     const contest = await callAPI('https://codeforces.com/api/contest.standings?contestId=' + contestID + '&showUnofficial=true')
 
     const allScoreboard = [];
     contest.rows.forEach(row => {
-        if (row.party.participantType == "CONTESTANT" || row.party.participantType == "OUT_OF_COMPETITION"){
+        if (row.party.participantType == "CONTESTANT" || row.party.participantType == "OUT_OF_COMPETITION"
+         || row.party.participantType == "VIRTUAL" && (virtualParticipation == PARTIAL_VIRTUAL || virtualParticipation == INCLUDE_VIRTUAL) ){
             allScoreboard.push(row);
         }
     });
     const allUserCount = allScoreboard.length;
 
     const contestList = await callAPI('https://codeforces.com/api/contest.list');
-    let contestIndex = 0, newRated = false;
+    let contestIndex = 0, oldRated = false, newRated = true;
 
     while (contestList[contestIndex].id != contestID){
         if (contestList[contestIndex].id == 1360){ newRated = false; }
+        if (contestList[contestIndex].id == 590){ oldRated = true; }
         contestIndex += 1;
     }
 
@@ -240,12 +263,12 @@ async function CodeForcesEdit(showType, performanceColumn){
                     row.beforeRating = ratedList[ratedIndex].oldRating;
                     row.afterRating = ratedList[ratedIndex].newRating;
                     row.rating = row.beforeRating;
+                    break;
                 }
             }
         }
     }
     const ratedUserCount = ratedScoreboard.length;
-    // console.log("ratedScoreboard", ratedScoreboard);
 
     let allRank = 0, ratedRank = 0;
     if (ratedUserCount >= 1){
@@ -270,13 +293,69 @@ async function CodeForcesEdit(showType, performanceColumn){
     }
 
     if (ratedUserCount >= 1){
-        // Calculate Rated Performance
+        for (let ratedUserIndex = 0; ratedUserIndex < ratedUserCount; ratedUserIndex++){
+            const row = ratedScoreboard[ratedUserIndex];
+            row.ratedSeed = 1;
+            for (let i = 0; i < ratedUserCount; i++){
+                if (i == ratedUserIndex){ continue; }
+                row.ratedSeed += eloWinProbability(ratedScoreboard[ratedUserIndex].rating, row.rating);
+            }
+        }
     }
+    if (showType == ACCURATE){
+        // Calculate All Seeds
+    }
+
+    for (let ratedUserIndex = 0; ratedUserIndex < ratedUserCount; ratedUserIndex++){
+        if (ratedUserIndex%100 == 0){ console.log(ratedUserIndex, ratedUserCount); }
+        const row = ratedScoreboard[ratedUserIndex];
+        let st = -10000, ed = 10001;
+        while (st+1 <= ed-1){
+            let mid = Math.floor( (st+ed)/2 );
+            let seed = 1;
+            for (let i = 0; i < ratedUserCount; i++){
+                if (i == ratedUserIndex){ continue; }
+                seed += eloWinProbability(ratedScoreboard[i].rating, mid);
+            }
+            if (seed < row.rank){ ed = mid; } else{ st = mid; }
+        }
+        let res = st;
+        if (res == -10000){ row.ratedPerformance = -Infinity; }
+        else if (res == 10000){ row.ratedPerformance = Infinity; }
+        else{ row.ratedPerformance = res; }
+    }
+
     if (showType == ACCURATE){
         // Calculate All Performance
     }
     if (showType == APPROXIMATE){
-        // Calculate Approximate Performance using Rated Performance
+        for (let allUserIndex = 0; allUserIndex < allUserCount; allUserIndex++){
+            let st = allUserIndex, ed = allUserIndex;
+            while (0 <= st){
+                if (allScoreboard[st].ratedPerformance != undefined){ break; }
+                else{ st -= 1; }
+            }
+            while (ed < allUserCount){
+                if (allScoreboard[ed].ratedPerformance != undefined){ break; }
+                else{ ed += 1; }
+            }
+            if (0 <= st && allScoreboard[st].rank == allScoreboard[allUserIndex].rank){
+                allScoreboard[allUserIndex].allPerformance = allScoreboard[st].ratedPerformance;
+            }
+            else if (ed < allUserCount && allScoreboard[ed].rank == allScoreboard[ed].rank){
+                allScoreboard[allUserIndex].allPerformance = allScoreboard[ed].ratedPerformance;
+            }
+            else{
+                if (st < 0){ allScoreboard[allUserIndex].allPerformance = Infinity; }
+                else if (allUserCount <= ed){ allScoreboard[allUserIndex].allPerformance = -Infinity; }
+                else{
+                    let p1 = allScoreboard[st].ratedPerformance, p2 = allScoreboard[ed].ratedPerformance;
+                    let r1 = allScoreboard[st].allRank, r2 = allScoreboard[ed].allRank;
+                    let r = allScoreboard[allUserIndex].allRank;
+                    allScoreboard[allUserIndex].allPerformance = Math.round( (r-r1) * (p2-p1)/(r2-r1) + p1 );
+                }
+            }
+        }
     }
 
     const problemCount = contest.problems.length;
@@ -325,7 +404,7 @@ async function CodeForcesEdit(showType, performanceColumn){
             if (problem.points != undefined){ th.innerHTML += '<br>' + '<span class="small">' + problem.points + '</span>'; }
             tr.appendChild(th);
         }
-        if (performanceColumn == SHOW){
+        if (performanceColumn == SHOW_PERFORMANCE){
             tr.appendChild( createTag('th', { innerHTML: "Perf.", className: 'top', style: { width: '4em' } }) );
             tr.appendChild( createTag('th', { innerHTML: "Delta", className: 'top', style: { width: '4em' } }) );
             tr.appendChild( createTag('th', { innerHTML: "Rating", className: 'top right', style: { width: '8em' } }) );
@@ -352,7 +431,7 @@ async function CodeForcesEdit(showType, performanceColumn){
         });
         if (!all){ continue; }
 
-        if (allData.rating == undefined){
+        if (showType == APPROXIMATE){
             const history = await callAPI('https://codeforces.com/api/user.rating?handle=' + handle);
             let historyPointer = history.length - 1;
             for (let historyIndex = 0; historyIndex <= contestIndex; historyIndex++){
@@ -361,13 +440,15 @@ async function CodeForcesEdit(showType, performanceColumn){
             }
             if (newRated){ allData.rating = 100; } else{ allData.rating = 1500; }
             if (historyPointer >= 0){ allData.rating = history[historyPointer].newRating; }
+            allData.beforeRating = allData.rating;
         }
 
         const submissions = await callAPI('https://codeforces.com/api/contest.status?contestId=' + contestID + '&handle=' + handle);
         const result = Array(problemCount);
         for (let problemIndex = 0; problemIndex < problemCount; problemIndex++){ result[problemIndex] = []; }
         submissions.forEach(submit => {
-            if (submit.author.participantType == "CONTESTANT" || submit.author.participantType == "OUT_OF_COMPETITION"){
+            if (submit.author.participantType == "CONTESTANT" || submit.author.participantType == "OUT_OF_COMPETITION"
+             || submit.author.participantType == "VIRTUAL" && (virtualParticipation == PARTIAL_VIRTUAL || virtualParticipation == INCLUDE_VIRTUAL) ){
                 result[ problemConverter[ submit.problem.index ] ].push(submit);
             }
         });
@@ -388,17 +469,17 @@ async function CodeForcesEdit(showType, performanceColumn){
                 className: 'left ' + dark,
                 innerHTML: '-' + '<br>' + '<small style="color: #BBBBBB">' + '(' + allData.allRank + ')' + '</small>'
             }) );
-            if (newRated && type == ACCURATE){
+            if (allData.party.participantType == "OUT_OF_COMPETITION"){
                 tr.appendChild( createTag('td', {
                     className: 'contestant-cell ' + dark,
-                    innerHTML: '<small>*</small> ' + userRatingHTML(handle, allData.rating - countMinus(allData.contestCount)),
+                    innerHTML: '<small>*</small> ' + userRatingHTML(handle, allData.beforeRating),
                     style: { textAlign: 'left', paddingLeft: '1em' }
                 }) );
             }
-            else{
+            if (allData.party.participantType == "VIRTUAL"){
                 tr.appendChild( createTag('td', {
                     className: 'contestant-cell ' + dark,
-                    innerHTML: '<small>*</small> ' + userRatingHTML(handle, allData.rating),
+                    innerHTML: '<small>#</small> ' + userRatingHTML(handle, allData.beforeRating),
                     style: { textAlign: 'left', paddingLeft: '1em' }
                 }) );
             }
@@ -444,30 +525,38 @@ async function CodeForcesEdit(showType, performanceColumn){
             else{
                 tr.appendChild( createTag('td', { className: dark }) );
             }
-            if (performanceColumn == SHOW){
-                if (allData.isRated){ // Rated (RatingChange = true)
-                    if (showType == ACCURATE){ // Rated Performance + All Performance
-                    
-                    }
-                    if (showType == APPROXIMATE){ // Rated Performance
-    
-                    }
-                    // Delta
-                    // Rating Change
+        }
+        if (performanceColumn == SHOW_PERFORMANCE){
+            if (allData.isRated){ // Rated (RatingChange = true)
+                if (showType == ACCURATE){ // Rated Performance + All Performance
+                    tr.appendChild( createTag('td', { className: dark, innerHTML: ratingHTML(allData.ratedPerformance)
+                     + '<br><span class="small">' + ratingHTML(allData.allPerformance) + '</span>' }) )
                 }
-                else{ // Unrated (RatingChange = false)
-                    if (showType == ACCURATE){ // All Performance
-                    
-                    }
-                    if (showType == APPROXIMATE){ // Approximated Performance using Rated Performance
-    
-                    }
-                    // Unrated
-                    // Rating
+                if (showType == APPROXIMATE){ // Rated Performance
+                    tr.appendChild( createTag('td', { className: dark, innerHTML: ratingHTML(allData.ratedPerformance) }) );
                 }
+                tr.appendChild( createTag('td', { className: dark, innerHTML: deltaHTML(allData.afterRating - allData.beforeRating) }) );
+                if (ratingToRank(allData.beforeRating) != ratingToRank(allData.afterRating)){
+                    tr.appendChild( createTag('td', { className: dark, innerHTML: ratingHTML(allData.beforeRating)
+                     + (allData.beforeRating < allData.afterRating ? ' ↗ ' : ' ↘ ') + ratingHTML(allData.afterRating) }) );
+                }
+                else{
+                    tr.appendChild( createTag('td', { className: dark, innerHTML: ratingHTML(allData.beforeRating) + ' → ' + ratingHTML(allData.afterRating) }) );
+                }
+            }
+            else{ // Unrated (RatingChange = false)
+                if (showType == ACCURATE){ // All Performance
+                    tr.appendChild( createTag('td', { className: dark, innerHTML: "-"
+                        + '<br><span class="small">' + ratingHTML(allData.allPerformance) + '</span>' }) );
+                }
+                if (showType == APPROXIMATE){ // Approximated Performance using Rated Performance
+                    tr.appendChild( createTag('td', { className: dark, innerHTML: '<span class="small">' + ratingHTML(allData.allPerformance) + '</span>' }) );
+                }
+                tr.appendChild( createTag('td', { className: dark, innerHTML: '<span style="font-weight: bold; color: lightgrey;" class="small">Unrated</span>' }) )
+                tr.appendChild( createTag('td', { className: dark, innerHTML: ratingHTML(allData.beforeRating) }) );
             }
         }
         tbody.appendChild(tr);
     }
     scoreboard.appendChild(tbody);
-} CodeForcesEdit(APPROXIMATE, SHOW);
+} CodeForcesEdit(APPROXIMATE, SHOW_PERFORMANCE, PARTIAL_VIRTUAL);
