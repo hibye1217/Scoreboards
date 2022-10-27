@@ -184,7 +184,7 @@ async function CodeForcesEdit(showType, performanceColumn, virtualParticipation)
         if (showType == ACCURATE){ console.log("    - with Accurate Performance"); }
         if (showType == APPROXIMATE){ console.log("    - with Approximated Performance"); }
         if (virtualParticipation == INCLUDE_VIRTUAL){ console.log("    - with virtual participants"); }
-        if (virtualParticipation == PARTIAL_VIRTUAL){ console.log("    - without virtual participants") }
+        if (virtualParticipation == PARTIAL_VIRTUAL || virtualParticipation == EXCLUDE_VIRTUAL){ console.log("    - without virtual participants") }
     }
     if (performanceColumn == HIDE_PERFORMANCE){ console.log("- Hiding Performance Column"); }
 
@@ -204,51 +204,47 @@ async function CodeForcesEdit(showType, performanceColumn, virtualParticipation)
     const allUserCount = allScoreboard.length;
 
     const contestList = await callAPI('https://codeforces.com/api/contest.list');
-    let contestIndex = 0, oldRated = false, newRated = true;
+    let contestIndex = 0, newRated = true;
 
+    const NEW_RATED_CONTEST = 1360;
     while (contestList[contestIndex].id != contestID){
-        if (contestList[contestIndex].id == 1360){ newRated = false; }
-        if (contestList[contestIndex].id == 590){ oldRated = true; }
+        if (contestList[contestIndex].id == NEW_RATED_CONTEST){ newRated = false; }
         contestIndex += 1;
     }
 
     const ratedScoreboard = [];
     if (showType == ACCURATE){
+        let contestCount = {}, lastRating = {};
+        if (newRated){
+            for (let i = contestList.length - 1; i != contestIndex; i++){
+                const ratedList = await callAPI('https://codeforces.com/api/contest.ratingChanges?contestId=' + contestList[i].id);
+                ratedList.forEach(user => {
+                    if (!(user.handle in contestCount)){ contestCount[user.handle] = 0; }
+                    contestCount[user.handle] += 1; lastRating[user.handle] = user.newRating;
+                });
+            }
+        }
+        const ratedList = await callAPI('https://codeforces.com/api/contest.ratingChanges?contestId=' + contestID);
         for (let rowIndex = 0; rowIndex < allUserCount; rowIndex++){
             const row = allScoreboard[rowIndex];
             const handle = row.party.members[0].handle;
-            const history = await callAPI('https://codeforces.com/api/user.rating?handle=' + handle);
             
-            row.isRated = false;
-
-            let pointer = history.length - 1;
-            for (let j = 0; j <= contestIndex; j++){
-                if (pointer < 0){ break; }
-                if (history[pointer].contestId == contestList[j].id){
-                    if (j == contestIndex){
-                        row.isRated = true;
-                        row.beforeRating = history[pointer].oldRating;
-                        row.afterRating = history[pointer].newRating;
-                        if (pointer == 0){
-                            if (newRated){ row.beforeRating = 100; }
-                            else{ row.beforeRating = 1500; }
-                        }
-                    }
-                    pointer -= 1;
+            row.contestCount = ( (handle in contestCount) ? contestCount[handle] : 0 );
+            
+            for (let ratedIndex = 0; ratedIndex < ratedList.length; ratedIndex++){
+                if (ratedList[ratedIndex].handle == handle){
+                    row.rated = true; ratedScoreboard.push(row);
+                    row.beforeRating = ratedList[ratedIndex].oldRating;
+                    row.afterRating = ratedList[ratedIndex].newRating;
                 }
             }
-
-            row.contestCount = pointer+1;
-            if (pointer >= 0){
-                row.rating = history[pointer].newRating;
+            if (handle in lastRating){
+                row.rating = lastRating[handle];
                 if (newRated){ row.rating += countMinus(row.contestCount); }
             }
             else{
-                if (newRated){ row.rating = 1400; }
-                else{ row.rating = 1500; }
+                if (newRated){ row.rating = 1400; } else{ row.rating = 1500; }
             }
-
-            if (row.isRated){ ratedScoreboard.push(row); }
         }
     }
     if (showType == APPROXIMATE){
@@ -284,6 +280,7 @@ async function CodeForcesEdit(showType, performanceColumn, virtualParticipation)
     if (showType == ACCURATE){
         let pointer = 0, score = allScoreboard[0].points;
         for (let allUserIndex = 0; allUserIndex < allUserCount; allUserIndex++){
+            if (allScoreboard[allUserIndex].party.participantType == "VIRTUAL" && virtualParticipation == PARTIAL_VIRTUAL){ continue; }
             if (allScoreboard[allUserIndex].points != score){
                 for (let i = pointer; i < allUserIndex; i++){ allScoreboard[i].allRank = i; }
                 pointer = allUserIndex; score = allScoreboard[allUserIndex].points;
@@ -302,8 +299,17 @@ async function CodeForcesEdit(showType, performanceColumn, virtualParticipation)
             }
         }
     }
-    if (showType == ACCURATE){
-        // Calculate All Seeds
+    if (showType == ACCURATE){ // Calculate All Seeds
+        for (let allUserIndex = 0; allUserIndex < allUserCount; allUserIndex++){
+            const row = allScoreboard[allUserIndex];
+            if (row.party.participantType == "VIRTUAL" && virtualParticipation == PARTIAL_VIRTUAL){ continue; }
+            row.allSeed = 1;
+            for (let i = 0; i < allUserCount; i++){
+                if (i == allUserIndex){ continue; }
+                if (allScoreboard[allUserIndex].party.participantType == "VIRTUAL" && virtualParticipation == PARTIAL_VIRTUAL){ continue; }
+                row.allSeed += eloWinProbability(allScoreboard[allUserIndex].rating, row.rating);
+            }
+        }
     }
 
     for (let ratedUserIndex = 0; ratedUserIndex < ratedUserCount; ratedUserIndex++){
@@ -325,8 +331,8 @@ async function CodeForcesEdit(showType, performanceColumn, virtualParticipation)
         else{ row.ratedPerformance = res; }
     }
 
-    if (showType == ACCURATE){
-        // Calculate All Performance
+    if (showType == ACCURATE){ // Calculate All Performance
+
     }
     if (showType == APPROXIMATE){
         for (let allUserIndex = 0; allUserIndex < allUserCount; allUserIndex++){
@@ -559,4 +565,4 @@ async function CodeForcesEdit(showType, performanceColumn, virtualParticipation)
         tbody.appendChild(tr);
     }
     scoreboard.appendChild(tbody);
-} CodeForcesEdit(APPROXIMATE, SHOW_PERFORMANCE, PARTIAL_VIRTUAL);
+} CodeForcesEdit(ACCURATE, SHOW_PERFORMANCE, PARTIAL_VIRTUAL);

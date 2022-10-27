@@ -1,0 +1,17 @@
+{
+    "name": "CodeForces Scoreboard",
+    "description": "코드포스 스코어보드를 꾸며줍니다.",
+    "version": "1.0",
+    "manifest_version": 3,
+    "content_scripts": [
+        {
+            "matches": [
+                "https://codeforces.com/contest/*/standings*"
+            ],
+            "run_at": "document_idle",
+            "js": [
+                "codeforces.js"
+            ]
+        }
+    ]
+}
