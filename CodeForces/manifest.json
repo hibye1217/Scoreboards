@@ -1,6 +1,6 @@
 {
-    "name": "CodeForces Scoreboard",
-    "description": "코드포스 스코어보드를 꾸며줍니다.",
+    "name": "Codeforces Scoreboard",
+    "description": "Decorating Codeforces's Scoreboard",
     "version": "1.0",
     "manifest_version": 3,
     "content_scripts": [
@@ -10,7 +10,7 @@
             ],
             "run_at": "document_idle",
             "js": [
-                "codeforces.js"
+                "Script/codeforces.js"
             ]
         }
     ]
