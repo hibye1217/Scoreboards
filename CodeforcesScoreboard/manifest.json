@@ -12,7 +12,8 @@
             "js": [
                 "Script/util.js",
                 "Script/problem.js", "Script/user.js", "Script/hack.js", "Script/submission.js",
-                "Script/row.js", "Script/scoreboard.js"
+                "Script/row.js", "Script/scoreboard.js",
+                "Script/main.js"
             ]
         }
     ]
